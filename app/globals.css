@@ -1,0 +1,23 @@
+:root {
+  --blue: #1C5FD4;
+  --cyan: #26C6FF;
+  --ink: #0d1b3e;
+  --muted: #6b7694;
+  --line: #e7ecf5;
+  --bg: #eef2f9;
+  --card: #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font-family: inherit; cursor: pointer; }
+input { font-family: inherit; }
