@@ -1,5 +1,7 @@
 const MAX_INPUT_LENGTH = 500;
 const MAX_PEOPLE = 1000;
+const FALLBACK_MODEL = 'gemini-3.5-flash';
+const MODEL_TIMEOUT_MS = 15000;
 
 function parseModelJson(text) {
   const trimmed = text.trim();
@@ -21,6 +23,13 @@ function normalizeExpense(value) {
   const description = typeof value.description === 'string'
     ? value.description.trim()
     : '';
+  const participantNames = Array.isArray(value.participantNames)
+    ? [...new Set(value.participantNames
+      .filter((name) => typeof name === 'string')
+      .map((name) => name.trim())
+      .filter(Boolean))]
+    : [];
+  const paidBy = typeof value.paidBy === 'string' ? value.paidBy.trim() : 'You';
 
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error('Gemini returned an invalid amount');
@@ -28,12 +37,17 @@ function normalizeExpense(value) {
   if (!Number.isInteger(people) || people < 1 || people > MAX_PEOPLE) {
     throw new Error('Gemini returned an invalid people count');
   }
+  if (participantNames.length > people) {
+    throw new Error('Gemini returned too many participant names');
+  }
 
   return {
     amount: Math.round(amount * 100) / 100,
     people,
     each: Math.round((amount / people) * 100) / 100,
     description: description || 'Expense',
+    participantNames,
+    paidBy: paidBy || 'You',
   };
 }
 
@@ -66,7 +80,9 @@ Return ONLY valid JSON with exactly these keys:
   "amount": number,
   "people": integer,
   "each": number,
-  "description": string
+  "description": string,
+  "paidBy": string,
+  "participantNames": string[]
 }
 
 Rules:
@@ -75,6 +91,9 @@ Rules:
 - "N friends" means N friends plus the speaker, so "split with 2 friends" means 3 people.
 - "just me" means 1 person.
 - Count named people, including the speaker when "me" is present.
+- paidBy is the person who paid; use "You" when the sentence says "me" or does not specify a payer.
+- participantNames must contain the exact names mentioned in the sentence, plus "You" when the sentence says "me".
+- If the sentence gives only a number of unnamed friends, leave participantNames empty.
 - each must equal amount divided by people.
 - description is a short label such as "dinner", "cab", or "coffee".
 - Never include markdown, explanations, or additional keys.
@@ -82,20 +101,45 @@ Rules:
 Human sentence: ${JSON.stringify(text)}`;
 
   const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const requestModel = async (modelName) => {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+
+    try {
+      return await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+          },
+        }),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
 
   try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: 'application/json',
-        },
-      }),
-    });
+    let response;
+    let activeModel = model;
+    try {
+      response = await requestModel(model);
+    } catch (error) {
+      if (error.name !== 'AbortError' || model === FALLBACK_MODEL) throw error;
+      console.error(`Gemini model "${model}" timed out; retrying with "${FALLBACK_MODEL}"`);
+      response = await requestModel(FALLBACK_MODEL);
+      activeModel = FALLBACK_MODEL;
+    }
+    if (response.status === 503 && model !== FALLBACK_MODEL) {
+      console.error(`Gemini model "${model}" is busy; retrying with "${FALLBACK_MODEL}"`);
+      response = await requestModel(FALLBACK_MODEL);
+      activeModel = FALLBACK_MODEL;
+    }
 
     if (!response.ok) {
       const upstream = await response.json().catch(() => null);
@@ -106,7 +150,7 @@ Human sentence: ${JSON.stringify(text)}`;
         return Response.json({ error: 'The Gemini API key is invalid or not authorized.' }, { status: 502 });
       }
       if (response.status === 404) {
-        return Response.json({ error: `The configured Gemini model "${model}" is unavailable. Update GEMINI_MODEL and restart the app.` }, { status: 502 });
+        return Response.json({ error: `The configured Gemini model "${activeModel}" is unavailable. Update GEMINI_MODEL and restart the app.` }, { status: 502 });
       }
       if (response.status === 429 || response.status === 503) {
         return Response.json({ error: 'Gemini is temporarily busy. Please try again in a moment.' }, { status: 503 });

@@ -76,7 +76,9 @@ Type a plain-English expense such as:
 
 The function asks Gemini for JSON containing `amount`, `people`, `each`, and `description`,
 validates the response, and recalculates `each` before the expense is added. Invalid or
-unparseable requests are shown as an error instead of being added with guessed values.
+unparseable requests are shown as an error instead of being added with guessed values. If the
+configured model is temporarily overloaded or times out, the function retries with
+`gemini-3.5-flash`.
 
 ## What's inside
 
@@ -87,6 +89,19 @@ unparseable requests are shown as an error instead of being added with guessed v
 | **AI function** | `app/api/parse-expense/route.js` — server-side Gemini JSON parsing |
 | **Styles** | `app/globals.css` + inline styles (deepEntra blue) |
 | **Data** | Saved in your browser (`localStorage`) for now — you'll move it to a real database in Hour 5 |
+
+## Accounts
+
+SplitSmart now requires a simple Supabase Auth account before showing the group dashboard.
+The UI only asks for a username and password; it does not expose email verification,
+magic links, or recovery links. Usernames are mapped to internal Supabase identities.
+Turn off **Authentication → Providers → Email → Confirm email** in Supabase so signup
+immediately logs the user in.
+
+The existing `supabase/schema.sql` creates the RLS-protected expenses table. Run it in the
+Supabase SQL Editor before using the expense dashboard. Expenses are loaded, created, and
+deleted through the authenticated `/api/expenses` route; participant IDs are stored in the
+`participants` JSON column for balance and settle-up calculations.
 
 ## Scripts
 ```bash
