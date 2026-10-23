@@ -3,6 +3,23 @@
 -- Run schema.sql first, then run this file. This migration is safe to rerun.
 -- Group join codes are bearer invitations: share them only with intended members.
 
+create table if not exists public.expenses (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  name        text not null,
+  emoji       text not null default '🧾',
+  paid_by     text not null,
+  amount      numeric not null check (amount > 0),
+  category    text not null default 'Other',
+  expense_date date not null default current_date,
+  created_at  timestamptz not null default now()
+);
+
+alter table public.expenses
+  add column if not exists participants jsonb not null default '[]'::jsonb,
+  add column if not exists category text not null default 'Other',
+  add column if not exists expense_date date not null default current_date;
+
 create table if not exists public.groups (
   id          uuid primary key default gen_random_uuid(),
   name        text not null check (length(trim(name)) > 0),
@@ -302,31 +319,7 @@ create policy expenses_delete on public.expenses
     and (group_id is null or public.is_active_group_member(group_id))
   );
 
--- SplitSmart: personal expenses and authenticated access.
---
--- Run this first in the Supabase SQL Editor. It is safe to run again.
--- For shared groups, run schema_hour6.sql after this file.
-
-create table if not exists public.expenses (
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references auth.users(id) on delete cascade,
-  name        text not null,
-  emoji       text not null default '🧾',
-  paid_by     text not null,
-  amount      numeric not null check (amount > 0),
-  category    text not null default 'Other',
-  expense_date date not null default current_date,
-  created_at  timestamptz not null default now()
-);
-
-alter table public.expenses
-  add column if not exists participants jsonb not null default '[]'::jsonb;
-
-alter table public.expenses
-  add column if not exists category text not null default 'Other',
-  add column if not exists expense_date date not null default current_date;
-
-do $$
+do $$ 
 begin
   if not exists (
     select 1 from pg_constraint
@@ -394,6 +387,7 @@ begin
       create policy expenses_update on public.expenses
       for update to authenticated
       using (auth.uid() = user_id and (group_id is null or public.is_active_group_member(group_id)))
+
       with check (auth.uid() = user_id and (group_id is null or public.is_active_group_member(group_id)))
     $policy$;
     execute $policy$
@@ -415,3 +409,62 @@ begin
   end if;
 end
 $$;
+
+-- Public profile metadata keeps the UI username-only while auth.users remains
+-- the source of truth for identity and RLS.
+create table if not exists public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  username text not null unique check (username ~ '^[a-z0-9_]{3,24}$'),
+  created_at timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+revoke all on public.profiles from anon;
+grant select, insert, update on public.profiles to authenticated;
+
+drop policy if exists profiles_select on public.profiles;
+drop policy if exists profiles_insert on public.profiles;
+drop policy if exists profiles_update on public.profiles;
+create policy profiles_select on public.profiles for select to authenticated using (true);
+create policy profiles_insert on public.profiles for insert to authenticated with check (auth.uid() = id);
+create policy profiles_update on public.profiles for update to authenticated using (auth.uid() = id) with check (auth.uid() = id);
+
+insert into public.profiles (id, username)
+select id,
+       coalesce(
+         nullif(lower(trim(raw_user_meta_data ->> 'username')), ''),
+         lower(split_part(email, '@', 1))
+       )
+from auth.users
+where coalesce(
+  nullif(lower(trim(raw_user_meta_data ->> 'username')), ''),
+  lower(split_part(email, '@', 1))
+) ~ '^[a-z0-9_]{3,24}$'
+on conflict (id) do update
+set username = excluded.username;
+
+create or replace function public.handle_new_user_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  requested_username text;
+begin
+  requested_username := lower(trim(new.raw_user_meta_data ->> 'username'));
+  if requested_username is null or requested_username !~ '^[a-z0-9_]{3,24}$' then
+    requested_username := lower(split_part(new.email, '@', 1));
+  end if;
+  insert into public.profiles (id, username)
+  values (new.id, requested_username)
+  on conflict (id) do update set username = excluded.username;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created_profile on auth.users;
+create trigger on_auth_user_created_profile
+  after insert on auth.users
+  for each row execute function public.handle_new_user_profile();
+revoke all on function public.handle_new_user_profile() from public;

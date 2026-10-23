@@ -1,20 +1,31 @@
-import { NextResponse } from 'next/server';
-import readDatabase, { updateDatabase } from '../../../../lib/db';
-import { cookieOptions, createSession, hashPassword, isValidUsername, normalizeUsername, SESSION_COOKIE } from '../../../../lib/auth';
+import { createSupabaseServerClient } from '../../../../lib/supabase-server';
+import { isValidUsername, normalizeUsername, usernameEmail } from '../../../../lib/username';
 
 export async function POST(request) {
-  let body;
-  try { body = await request.json(); } catch { return Response.json({ error: 'Request body must be valid JSON.' }, { status: 400 }); }
+  const body = await request.json().catch(() => null);
   const username = normalizeUsername(body?.username);
-  const password = body?.password;
-  if (!isValidUsername(username)) return Response.json({ error: 'Username must be 3–24 characters using letters, numbers, or underscores.' }, { status: 400 });
-  if (typeof password !== 'string' || password.length < 8 || password.length > 128) return Response.json({ error: 'Password must be between 8 and 128 characters.' }, { status: 400 });
-  if (readDatabase().users.some((user) => user.username === username)) return Response.json({ error: 'That username is already registered. Try logging in.' }, { status: 409 });
-  const database = readDatabase();
-  const userId = database.nextUserId;
-  updateDatabase((current) => ({ ...current, nextUserId: current.nextUserId + 1, users: [...current.users, { id: userId, username, passwordHash: hashPassword(password) }] }));
-  const session = createSession(userId);
-  const response = NextResponse.json({ username });
-  response.cookies.set(SESSION_COOKIE, session.sessionId, cookieOptions(session.expiresAt));
-  return response;
+  if (!isValidUsername(username) || typeof body?.password !== 'string' || body.password.length < 8) {
+    return Response.json({ error: 'Use a username of 3–24 characters and a password of at least 8 characters.' }, { status: 400 });
+  }
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase.auth.signUp({ email: usernameEmail(username), password: body.password, options: { data: { username } } });
+  if (error) {
+    if (/confirmation email|sending.*email|email.*send/i.test(error.message)) {
+      return Response.json({
+        error: 'Supabase is trying to send a confirmation email. In Supabase Dashboard, open Authentication → Providers → Email and turn off Confirm email, then try signing up again.',
+      }, { status: 503 });
+    }
+    return Response.json({ error: /already/i.test(error.message) ? 'That username is already registered.' : error.message }, { status: 400 });
+  }
+  if (!data.session || !data.user) return Response.json({ error: 'Disable email confirmation in Supabase Auth to use username/password signup.' }, { status: 503 });
+  const { error: profileError } = await supabase.from('profiles').upsert({ id: data.user.id, username }, { onConflict: 'id' });
+  if (profileError) {
+    const missingTable = /relation .*profiles.* does not exist|could not find the table/i.test(profileError.message);
+    return Response.json({
+      error: missingTable
+        ? 'Account created, but the profiles table is missing. Run supabase/schema.sql in the Supabase SQL Editor, then log in again.'
+        : `Account created, but the profile could not be saved: ${profileError.message}`,
+    }, { status: 500 });
+  }
+  return Response.json({ username });
 }

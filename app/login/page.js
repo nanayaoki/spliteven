@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { readJsonResponse } from '../../lib/response';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,8 +22,7 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Authentication failed.');
+      await readJsonResponse(response, 'Authentication failed.');
       router.replace('/');
       router.refresh();
     } catch (requestError) {

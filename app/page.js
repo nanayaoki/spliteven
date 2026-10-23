@@ -1,11 +1,11 @@
 import { redirect } from 'next/navigation';
-import { getSessionUser } from '../lib/auth';
+import { createSupabaseServerClient } from '../lib/supabase-server';
 import HomeClient from './home-client';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const user = getSessionUser();
+  const { data: { user } } = await createSupabaseServerClient().auth.getUser();
   if (!user) redirect('/login');
-  return <HomeClient username={user.username} />;
+  return <HomeClient username={user.user_metadata?.username || user.email?.split('@')[0] || 'user'} />;
 }

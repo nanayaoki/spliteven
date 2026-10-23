@@ -90,12 +90,25 @@ configured model is temporarily overloaded or times out, the function retries wi
 | **Styles** | `app/globals.css` + inline styles (deepEntra blue) |
 | **Data** | Saved in your browser (`localStorage`) for now — you'll move it to a real database in Hour 5 |
 
-## Accounts
+## Accounts and groups
 
-SplitSmart uses a simple local username/password account. There is no email verification,
-magic-link flow, or external auth provider. Passwords are hashed on the server and sessions
-are stored in the git-ignored `data/splitsmart.json` file. People and expenses are kept in
-the browser under a key scoped to the logged-in username.
+SplitSmart uses a username/password-only Supabase Auth account. Users never enter an email:
+the server maps each username to an internal identity. In the Supabase dashboard, disable
+**Confirm email** under Authentication → Providers → Email so signup logs in immediately and
+does not require an SMTP/confirmation-email service. If signup reports an email-sending error,
+this setting is still enabled.
+
+Run [`supabase/schema.sql`](./supabase/schema.sql) in the Supabase SQL Editor before using the
+app. It creates the shared `groups`, `group_members`, `profiles`, and group-scoped `expenses`
+tables, plus the membership helper functions and Row-Level Security policies. The dashboard
+lets a user create groups, switch between groups, invite others with a join code, and join a
+group by code. All expense reads and writes include the active group and are enforced again
+by database RLS.
+
+If the account was created before the schema finished, run
+[`supabase/profiles.sql`](./supabase/profiles.sql) separately. Then log in again; the app
+repairs the profile for the existing account. This migration also installs a database trigger
+so every future Supabase Auth user receives a profile automatically.
 
 ## Scripts
 ```bash

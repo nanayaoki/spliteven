@@ -1,15 +1,19 @@
-import { NextResponse } from 'next/server';
-import readDatabase from '../../../../lib/db';
-import { cookieOptions, createSession, isValidUsername, normalizeUsername, SESSION_COOKIE, verifyPassword } from '../../../../lib/auth';
+import { createSupabaseServerClient } from '../../../../lib/supabase-server';
+import { isValidUsername, normalizeUsername, usernameEmail } from '../../../../lib/username';
 
 export async function POST(request) {
-  let body;
-  try { body = await request.json(); } catch { return Response.json({ error: 'Request body must be valid JSON.' }, { status: 400 }); }
+  const body = await request.json().catch(() => null);
   const username = normalizeUsername(body?.username);
-  const user = readDatabase().users.find((item) => item.username === username);
-  if (!user || !isValidUsername(username) || typeof body?.password !== 'string' || !verifyPassword(body.password, user.passwordHash)) return Response.json({ error: 'Invalid username or password.' }, { status: 401 });
-  const session = createSession(user.id);
-  const response = NextResponse.json({ username });
-  response.cookies.set(SESSION_COOKIE, session.sessionId, cookieOptions(session.expiresAt));
-  return response;
+  if (!isValidUsername(username) || typeof body?.password !== 'string') return Response.json({ error: 'Invalid username or password.' }, { status: 401 });
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase.auth.signInWithPassword({ email: usernameEmail(username), password: body.password });
+  if (error) return Response.json({ error: 'Invalid username or password.' }, { status: 401 });
+  const { error: profileError } = await supabase.from('profiles').upsert(
+    { id: data.user.id, username },
+    { onConflict: 'id' },
+  );
+  if (profileError) {
+    return Response.json({ error: 'Login succeeded, but the profiles table is not ready. Run supabase/schema.sql in the Supabase SQL Editor, then log in again.' }, { status: 503 });
+  }
+  return Response.json({ username });
 }
