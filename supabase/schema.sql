@@ -26,7 +26,7 @@ create table if not exists public.groups (
   description text,
   currency    text not null default 'INR',
   join_code   text not null unique
-    default upper(replace(gen_random_uuid()::text, '-', '')),
+    default upper(substr(md5(random()::text), 1, 6)),
   created_by  uuid not null references auth.users(id) on delete cascade,
   archived    boolean not null default false,
   created_at  timestamptz not null default now(),
@@ -41,13 +41,12 @@ alter table public.groups
 
 alter table public.groups
   alter column join_code
-  set default upper(replace(gen_random_uuid()::text, '-', ''));
+  set default upper(substr(md5(random()::text), 1, 6));
 
--- Replace legacy six-character codes with high-entropy values. This
--- intentionally invalidates previously shared codes.
+-- Replace legacy codes with short six-character invite codes.
 update public.groups
-set join_code = upper(replace(gen_random_uuid()::text, '-', ''))
-where length(join_code) < 32;
+set join_code = upper(substr(md5(random()::text), 1, 6))
+where length(join_code) <> 6;
 
 create table if not exists public.group_members (
   group_id  uuid not null references public.groups(id) on delete cascade,
@@ -202,7 +201,7 @@ begin
   if joining_user is null then
     raise exception 'Sign in before joining a group';
   end if;
-  if code is null or length(trim(code)) <> 32 then
+  if code is null or length(trim(code)) <> 6 then
     raise exception 'Invalid invitation code';
   end if;
 

@@ -110,6 +110,10 @@ If the account was created before the schema finished, run
 repairs the profile for the existing account. This migration also installs a database trigger
 so every future Supabase Auth user receives a profile automatically.
 
+Invite codes are six-character uppercase codes. If group creation reports a database setup
+error, or if the project was created with the older long codes, run
+[`supabase/group-creation.sql`](./supabase/group-creation.sql) after the main schema.
+
 ## Scripts
 ```bash
 npm run dev     # local dev → http://localhost:3000

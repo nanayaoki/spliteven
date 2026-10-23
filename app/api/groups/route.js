@@ -46,7 +46,20 @@ export async function POST(request) {
   const body = await request.json().catch(() => null);
   const name = typeof body?.name === 'string' ? body.name.trim() : '';
   if (!name) return Response.json({ error: 'Group name is required.' }, { status: 400 });
-  const { data, error } = await context.supabase.from('groups').insert({ name, created_by: context.user.id }).select('id, name, join_code, created_by').single();
-  if (error) return Response.json({ error: 'Could not create the group.' }, { status: 500 });
+  const { data: groupId, error } = await context.supabase.rpc('create_group', { group_name: name });
+  if (error) {
+    const missingRpc = /function .*create_group.* does not exist/i.test(error.message);
+    return Response.json({
+      error: missingRpc
+        ? 'Group setup is incomplete. Run supabase/group-creation.sql in the Supabase SQL Editor.'
+        : `Could not create the group: ${error.message}`,
+    }, { status: 500 });
+  }
+  const { data, error: loadError } = await context.supabase
+    .from('groups')
+    .select('id, name, join_code, created_by')
+    .eq('id', groupId)
+    .single();
+  if (loadError) return Response.json({ error: `Group was created, but could not be loaded: ${loadError.message}` }, { status: 500 });
   return Response.json({ group: data }, { status: 201 });
 }
