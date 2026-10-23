@@ -92,16 +92,10 @@ configured model is temporarily overloaded or times out, the function retries wi
 
 ## Accounts
 
-SplitSmart now requires a simple Supabase Auth account before showing the group dashboard.
-The UI only asks for a username and password; it does not expose email verification,
-magic links, or recovery links. Usernames are mapped to internal Supabase identities.
-Turn off **Authentication → Providers → Email → Confirm email** in Supabase so signup
-immediately logs the user in.
-
-The existing `supabase/schema.sql` creates the RLS-protected expenses table. Run it in the
-Supabase SQL Editor before using the expense dashboard. Expenses are loaded, created, and
-deleted through the authenticated `/api/expenses` route; participant IDs are stored in the
-`participants` JSON column for balance and settle-up calculations.
+SplitSmart uses a simple local username/password account. There is no email verification,
+magic-link flow, or external auth provider. Passwords are hashed on the server and sessions
+are stored in the git-ignored `data/splitsmart.json` file. People and expenses are kept in
+the browser under a key scoped to the logged-in username.
 
 ## Scripts
 ```bash

@@ -89,13 +89,7 @@ export default function Home({ username }) {
       try {
       const savedPeople = normalizePeople(JSON.parse(localStorage.getItem(peopleKey) || 'null'));
       setPeople(savedPeople);
-      const response = await fetch('/api/expenses');
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Could not load expenses.');
-      const savedExpenses = result.expenses.length
-        ? result.expenses
-        : normalizeExpenses(JSON.parse(localStorage.getItem(expensesKey) || 'null'), savedPeople);
-      setExpenses(normalizeExpenses(savedExpenses, savedPeople));
+      setExpenses(normalizeExpenses(JSON.parse(localStorage.getItem(expensesKey) || 'null'), savedPeople));
       setPaidBy((current) => savedPeople.some((person) => person.id === current) ? current : savedPeople[0].id);
       setParticipants(savedPeople.map((person) => person.id));
       } catch (loadError) {
@@ -200,33 +194,14 @@ export default function Home({ username }) {
     saveExpense(expense);
   };
 
-  const saveExpense = async (expense) => {
-    try {
-      const response = await fetch('/api/expenses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(expense),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Could not save the expense.');
-      setExpenses((current) => [...current, result.expense]);
-      setDescription('');
-      setAmount('');
-      setError('');
-    } catch (saveError) {
-      setError(saveError.message);
-    }
+  const saveExpense = (expense) => {
+    setExpenses((current) => [...current, { ...expense, id: `expense-${Date.now()}` }]);
+    setDescription('');
+    setAmount('');
+    setError('');
   };
 
-  const removeExpense = async (id) => {
-    try {
-      const response = await fetch(`/api/expenses?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error('Could not remove the expense.');
-      setExpenses((current) => current.filter((item) => item.id !== id));
-    } catch (removeError) {
-      setError(removeError.message);
-    }
-  };
+  const removeExpense = (id) => setExpenses((current) => current.filter((item) => item.id !== id));
 
   const addAiExpense = async () => {
     const sentence = text.trim();
